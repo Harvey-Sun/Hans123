@@ -32,7 +32,9 @@ def init_per_day(sdk):
     # 获取仓位信息
     positions = sdk.getPositions()
     stock_position = dict([[i.code, 1] for i in positions])
+    base_position = dict([i.code, i.optPosition] for i in positions)
     sdk.setGlobal('stock_position', stock_position)
+    sdk.setGlobal('base_position', base_position)
     # 找到中证500外的有仓位的股票
     out_zz500_stock = list(set(stock_position.keys()) - set(zz500))
     # 当日没有停牌的股票
@@ -47,6 +49,7 @@ def init_per_day(sdk):
     sdk.sdklog(len(stock_available), '订阅股票数量')
     sdk.sdklog(len(stock_position), '底仓股票数量')
     sdk.subscribeQuote(stock_available)
+
 
 
 def strategy(sdk):
@@ -64,6 +67,7 @@ def strategy(sdk):
         quotes = sdk.getQuotes(stock_available)
         # 有底仓的股票
         stock_position = sdk.getGlobal('stock_position')
+
         # 考虑被移出中证500的那些股票，卖出其底仓
         base_clear = []
         if out_zz500_available:
@@ -78,7 +82,6 @@ def strategy(sdk):
         # 计算仓位股票和可用资金
         number = sum(stock_position.values()) / 2  # 计算有多少个全仓股
         available_cash = sdk.getAccountInfo().availableCash / (500 - number) if number < 500 else 0
-        sdk.setGlobal('available_cash', available_cash)
         # 建立底仓
         stock_to_build_base = list(set(zz500_available) - set(stock_position.keys()))
         base_hold = []
@@ -136,8 +139,6 @@ def strategy(sdk):
         down_line = pd.Series(sdk.getGlobal('min_low'), index=zz500_tradable)
         # 取得盘口数据
         quotes = sdk.getQuotes(zz500_tradable)
-        # 可用资金
-        available_cash = sdk.getGlobal('available_cash')
             
         buy_orders = []
         sell_orders = []
@@ -147,7 +148,7 @@ def strategy(sdk):
             up = up_line[stock]
             down = down_line[stock]
             if (current_price > up) & (stock_position[stock] == 1):
-                volume = 100 * np.floor(available_cash * 0.5 / (100 * current_price))
+                volume = position_dict[stock]
                 if volume > 0:
                     order = [stock, current_price, volume, 1]
                     buy_orders.append(order)
@@ -174,9 +175,7 @@ def strategy(sdk):
 
     if sdk.getNowTime() == '145500':
         # 获取仓位信息及有仓位的股票
-        positions = sdk.getPositions()
-        position_dict = dict([[i.code, i.optPosition] for i in positions])
-        available_cash = sdk.getGlobal('available_cash')
+        base_position = sdk.getGlobal('base_position')
         stock_position = sdk.getGlobal('stock_position')
         stock_to_clear = list(stock_position.keys())
         quotes = sdk.getQuotes(stock_to_clear)
@@ -184,12 +183,12 @@ def strategy(sdk):
         for stock in stock_to_clear:
             if stock_position[stock] == 2:
                 price = quotes[stock].current
-                volume = position_dict[stock]
+                volume = base_position[stock]
                 order = [stock, price, volume, -1]
                 clear_orders.append(order)
             elif stock_position[stock] == 0:
                 price = quotes[stock].current
-                volume = 100 * np.floor(available_cash * 0.5 / (price * 100))
+                volume = base_position[stock]
                 order = [stock, price, volume, 1]
                 clear_orders.append(order)
             else:
